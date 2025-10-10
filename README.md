@@ -1,3 +1,15 @@
+---
+title: Simple PDF RAG Chatbot
+emoji: ⚡
+colorFrom: red
+colorTo: gray
+sdk: gradio
+app_file: app.py
+pinned: false
+license: mit
+short_description: "Privacy-first RAG chatbot to query your PDFs with citations."
+---
+
 # 📘 Simple PDF RAG Chatbot (Gradio + Qdrant + Gemini)
 
 A privacy-friendly **RAG** (Retrieval-Augmented Generation) chatbot for **question answering over your own PDFs**.  
