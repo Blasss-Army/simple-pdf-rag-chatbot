@@ -7,7 +7,8 @@ sdk: gradio
 app_file: app.py
 pinned: false
 license: mit
-short_description: "Privacy-first RAG chatbot to query your PDFs with citations."
+short_description: Privacy-first RAG chatbot to query your PDFs with citations.
+sdk_version: 5.49.1
 ---
 
 # 📘 Simple PDF RAG Chatbot (Gradio + Qdrant + Gemini)
