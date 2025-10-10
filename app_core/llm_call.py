@@ -29,7 +29,7 @@ class Chat:
         # Configure the LLM
         llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.2)
         # Create retriever
-        self.retriever = Retriever(RetrieverConfig(reset_collection=False))
+        self.retriever = Retriever(RetrieverConfig())
         # Question
         self.chain = ConversationalRetrievalChain.from_llm(llm = llm, 
                                                         retriever = self.retriever.retriever,
