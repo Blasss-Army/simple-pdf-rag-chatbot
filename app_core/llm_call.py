@@ -1,4 +1,5 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
+from .prompt import QA_PROMPT_DEF
 from dotenv import load_dotenv
 from google import genai
 import os
@@ -34,7 +35,12 @@ class Chat:
         self.chain = ConversationalRetrievalChain.from_llm(llm = llm, 
                                                         retriever = self.retriever.retriever,
                                                         return_source_documents=True,
-                                                        memory = self.memory,)
+                                                        memory = self.memory,
+                                                        verbose=False,   # <-- True : prints the prompt and internal steps
+                                                        combine_docs_chain_kwargs = {
+                                                            'prompt': QA_PROMPT_DEF
+                                                        }
+                                                        )
         
     def run_llm_call(self, question):
         '''
@@ -50,3 +56,9 @@ class Chat:
         self.memory.clear()
 
         return 'All memory storaged has been deleted'
+    
+    def retriever_close(self):
+        try:
+            self.retriever.close()   
+        except Exception:
+            pass

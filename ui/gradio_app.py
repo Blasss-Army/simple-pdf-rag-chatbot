@@ -1,21 +1,35 @@
 import gradio as gr
-
+import os
 
 def run_gradio(Chat):
+
+    def get_pdf_url(File):
+        space_id = os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID")
+        if space_id:
+             return f"https://huggingface.co/spaces/{space_id}/blob/main/data/{File}"
+        # En local → crea URL relativa
+        return f"./data/{File}"
+
+    def get_pdf_link(answer):
+
+        lines = []
+        for i, d in enumerate(answer['source_documents']):
+            file_name  = d.metadata.get("source")
+            file_name = file_name.replace("/", "\\").split("\\")[-1]
+            page = d.metadata.get("page", "¿?")
+            url = get_pdf_url(file_name)    
+            lines.append(f"[{i}] [{file_name} — p.{page}] {url}\n")
+        sources = "\n".join(lines)
+
+        return sources
+  
 
     def send_question(question, chat_state):
         if chat_state is None:
             chat_state = Chat()               
 
         answer = chat_state.run_llm_call(question)
-
-        lines = []
-        for i, d in enumerate(answer['source_documents']):
-            src  = d.metadata.get("source")
-            src = src.replace("/", "\\").split("\\")[-1]
-            page = d.metadata.get("page", "¿?")
-            lines.append(f"[{i}] {src} — p.{page} \n")
-        sources = "\n".join(lines)
+        sources = get_pdf_link(answer=answer)
 
         return answer['answer'], sources , chat_state             
 
@@ -25,6 +39,7 @@ def run_gradio(Chat):
         if (len(chat_state.memory.chat_memory.messages) == 0):
             return 'Memory is already empty'
         return chat_state.clear_memory()
+    
 
     with gr.Blocks() as demo:
         gr.Markdown(
@@ -40,8 +55,7 @@ def run_gradio(Chat):
 
         salida = gr.Textbox(label="Answer",
                             lines=20,                    
-                            max_lines=25,               
-                                         
+                            max_lines=25,                     
                             show_copy_button=True)
 
         # State container -> The sesion state will be storaged here
