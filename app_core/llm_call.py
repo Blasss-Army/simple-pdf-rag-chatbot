@@ -28,11 +28,14 @@ class Chat:
         # Initialaze Gemini client
         client = genai.Client(api_key=api_key)
         # Configure the LLM
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.2)
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.2)
         # Create retriever
         self.retriever = Retriever(RetrieverConfig())
         # Question
-        self.chain = ConversationalRetrievalChain.from_llm(llm = llm, 
+        self._make_chain()
+        
+    def _make_chain(self):
+        self.chain = ConversationalRetrievalChain.from_llm(llm = self.llm, 
                                                         retriever = self.retriever.retriever,
                                                         return_source_documents=True,
                                                         memory = self.memory,
@@ -50,7 +53,6 @@ class Chat:
         '''
         return self.chain.invoke({"question": question})
         
-
     def clear_memory(self):
         '''Clears the chat memory'''
         self.memory.clear()
@@ -62,3 +64,33 @@ class Chat:
             self.retriever.close()   
         except Exception:
             pass
+
+    
+    def modify_retriever_cfg(self, cfg):
+
+        for i in cfg:
+            if i in vars(self.retriever.cfg):
+                vars(self.retriever.cfg)[i] = cfg[i]
+                
+    def update_retriever_settings(self, cfg):
+       
+        # cierra conexiones/clients si procede
+        self.retriever_close()   
+        # 
+        self.modify_retriever_cfg(cfg)  
+
+        #Update the retriever confg with the new confg
+        self.retriever = Retriever(self.retriever.cfg)
+
+        # opción A: solo reasignar
+        if hasattr(self.chain, "retriever"):
+            self.chain.retriever = self.retriever.retriever
+
+        else:
+            # opción B: reconstruir chain completa
+            self.chain = self._make_chain()
+            
+    
+
+
+        

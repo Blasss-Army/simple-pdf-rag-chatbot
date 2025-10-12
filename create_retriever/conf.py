@@ -18,7 +18,6 @@ class RetrieverConfig:
     collection_name: str = "my_collection"                 # name of the collection in Qdrant
     distance: Distance = Distance.COSINE                   # similarity metric in Qdrant
     prefer_grpc: bool = True                               # use gRPC (faster/more efficient)
-    recreate: bool = False                                 # if True, delete and recreate the collection
     temperature: float = 0.2                               # temperature for text generation (LLM)
     reset_collection: bool = True                         # if True, delete the collection on startup
     #-----------EMBEDDING MODEL CONFIG---------------

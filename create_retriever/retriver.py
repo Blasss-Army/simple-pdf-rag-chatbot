@@ -1,6 +1,4 @@
 import os
-from pathlib import Path
-from typing import List, Literal, Optional, Tuple
 from dataclasses import dataclass
 from .conf import RetrieverConfig
 import uuid
@@ -110,8 +108,8 @@ class Retriever():
 
         # 2) Initialize Qdrant client (local instance) -->>> Good practice
         client = QdrantClient(
-            path=str(path),     # Convertir a cadena
-            prefer_grpc=False,  # Cambiar a False si hay problemas con gRPC
+            path=str(path),                          # Convertir a cadena
+            prefer_grpc=self.cfg.prefer_grpc,        # Cambiar a False si hay problemas con gRPC
         )
 
         # 3) Create the collection (Only if it doesnt exits)
@@ -121,7 +119,7 @@ class Retriever():
                 collection_name=collection_name,
                 vectors_config=VectorParams(size=embedding_dim, distance=Distance.COSINE),
             )
-
+            
         # 3.1) If reset_collection=True, delete all points in the collection
         if self.cfg.reset_collection:
             client.delete(
@@ -139,19 +137,23 @@ class Retriever():
             collection_name=collection_name
         )
 
-        # 5) Add chunks and metadatas to vectorestore (It only indexes if the value reset_collection =True)
-        if self.cfg.reset_collection:
+        # 5) Add chunks and metadatas to vectorestore (It only indexes if the collection is empty)
+        if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
             ids = self._make_ids(chunks)
             vectorestore.add_documents(chunks, ids=ids)
 
-        # 6) Create retriever from vectorestore
+        # 6) kwargs seguros según search_type
+        kwargs = {"k": self.cfg.vectore_store_k}
+        if self.cfg.vectore_store_search_type == "mmr":
+            kwargs.update({
+                "fetch_k": self.cfg.vectore_store_fetch_k,
+                "lambda_mult": float(self.cfg.vectore_store_lambda_mult),
+            })
+
+        # 7) Create retriever from vectorestore
         retriever = vectorestore.as_retriever(search_type= self.cfg.vectore_store_search_type,
-                                                search_kwargs={
-                                                                "k": self.cfg.vectore_store_k,
-                                                                "fetch_k": self.cfg.vectore_store_fetch_k,
-                                                                "lambda_mult": self.cfg.vectore_store_lambda_mult,
-                                                                },)
-        
+                                                search_kwargs=kwargs,
+                                             )
         return client,retriever
     
     def _make_ids(self, chunks):
@@ -187,3 +189,11 @@ class Retriever():
             list: List of relevant documents.
         '''
         return self.retriever.invoke(query)
+    
+
+    def vector_count(self) -> int:
+        """Número de vectores (points) en la colección actual."""
+        return self.client.count(
+            collection_name=self.cfg.collection_name,
+            exact=True,   # True = conteo exacto
+        ).count
