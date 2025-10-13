@@ -29,9 +29,9 @@ class Retriever():
         # 1) Retriever configuration
         self.cfg = cfg              
         # 2) Load documents from the 'data' directory
-        self.documents = self.load_documents_from_directory(self.cfg.data_path)
+        self.all_document_pages = self.load_documents_from_directory(self.cfg.data_path)
         # 3) Create chunks from the loaded documents
-        self.chunks = self.create_chunks_splits(self.documents, chunk_size=1000, chunk_overlap=200, splitter='recursive')
+        self.chunks = self.create_chunks_splits(self.all_document_pages, chunk_size=1000, chunk_overlap=200, splitter='recursive')
         # 4) Build the Qdrant retriever
         self.client, self.retriever = self.build_retriever(chunks=self.chunks, collection_name=self.cfg.collection_name, path=self.cfg.index_path)
                     
@@ -50,14 +50,23 @@ class Retriever():
             list: List of loaded PDF documents.
         '''
 
-        documents = []
+        all_document_pages = []
         loader = DirectoryLoader(
                 str(directory_path),  # Convertir a cadena
                 glob="**/*.pdf",          # todos los PDFs (subcarpetas incluidas)
                 loader_cls=PyPDFLoader
             )
-        documents = loader.load()
-        return documents
+        all_document_pages = loader.load()
+        return all_document_pages
+    
+    def load_documents_from_gradio(self, documents):
+        docs = []
+        for i in documents:
+            loader = PyPDFLoader(i)
+            pages = loader.load()
+            docs.extend(pages
+                        )
+        return docs
 
     def create_chunks_splits(self, documents, chunk_size=1000, chunk_overlap=200, splitter = 'recursive'):  # By default, use recursive splitter
 
@@ -139,8 +148,8 @@ class Retriever():
 
         # 5) Add chunks and metadatas to vectorestore (It only indexes if the collection is empty)
         if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
-            ids = self._make_ids(chunks)
-            vectorestore.add_documents(chunks, ids=ids)
+             ids = self._make_ids(chunks)
+             vectorestore.add_documents(chunks, ids=ids)
 
         # 6) kwargs seguros según search_type
         kwargs = {"k": self.cfg.vectore_store_k}
@@ -154,7 +163,18 @@ class Retriever():
         retriever = vectorestore.as_retriever(search_type= self.cfg.vectore_store_search_type,
                                                 search_kwargs=kwargs,
                                              )
+        
+        if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
+             ids = self._make_ids(chunks)
+             retriever.add_documents(chunks, ids=ids)
+
         return client,retriever
+    
+    def add_chunks_into_vectorestorage(self,chunks):
+        ids = self._make_ids(chunks)
+        self.retriever.add_documents(chunks, ids=ids)
+        return 'New chunks have been uploaded into the Retriever'
+
     
     def _make_ids(self, chunks):
         '''Generate **deterministic, human-traceable IDs** for document chunks.

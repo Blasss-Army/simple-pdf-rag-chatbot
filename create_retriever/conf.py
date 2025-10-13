@@ -19,7 +19,7 @@ class RetrieverConfig:
     distance: Distance = Distance.COSINE                   # similarity metric in Qdrant
     prefer_grpc: bool = True                               # use gRPC (faster/more efficient)
     temperature: float = 0.2                               # temperature for text generation (LLM)
-    reset_collection: bool = True                         # if True, delete the collection on startup
+    reset_collection: bool = False                         # if True, delete the collection on startup
     #-----------EMBEDDING MODEL CONFIG---------------
     embed_model: str = "models/text-embedding-004"         # embeddings model (Google)
     #-----------VECTOR STORE CONFIG----------------

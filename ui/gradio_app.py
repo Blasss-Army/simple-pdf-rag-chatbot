@@ -20,6 +20,8 @@ def run_gradio(Chat):
             page = d.metadata.get("page", "¿?")
             url = get_pdf_url(file_name)    
             lines.append(f"[{i}] [{file_name} — p.{page}] {url}\n")
+
+            print(f'\n Source {i},   --->   {d} \n\n')
         sources = "\n".join(lines)
 
         return sources
@@ -49,7 +51,6 @@ def run_gradio(Chat):
     
     # ----------------------- APPLY THE CONF CHANGES TO THE RETRIEVER ------------------------
 
-        
     def pack_and_apply(chat_state, temperature, reset_collection):
 
         cfg = {
@@ -76,6 +77,25 @@ def run_gradio(Chat):
         metric_html = metric_card("Vector store", count, "points in collection")
         return chat_state , ok_html, metric_html 
 
+        # ------------------- ADD NEW DOCUMENT(CHUNKS) INTO THE VECTORE STORAGE -----------------------------
+
+    def add_new_doc(chat_state, documents):
+        if chat_state is None:
+            chat_state = Chat()
+
+        pages = chat_state.retriever.load_documents_from_gradio(documents)
+        chunks = chat_state.retriever.create_chunks_splits(pages, chunk_size=1000, chunk_overlap=200, splitter='recursive')
+        for i, d  in enumerate(chunks):
+            print(f'\n -------------------------------- CHUNKS AÑADIDOS   {d.page_content}............................................\n\n')
+        #
+        added =chat_state.retriever.add_chunks_into_vectorestorage(chunks)
+        ok_html = status_box(added, "success")
+        
+        #
+        count = chat_state.retriever.vector_count()
+        metric_html = metric_card("Vector store", count, "points in collection")
+
+        return chat_state, ok_html, metric_html
 
     CSS = """
         .gradio-container { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial; }
@@ -126,6 +146,21 @@ def run_gradio(Chat):
                     apply_msg = gr.HTML()
                     vectore_storage_size = gr.HTML()
 
+            # ======== Tab 3: Add new documents ========
+            with gr.TabItem("Add new documents"):
+                gr.Markdown(
+                """
+                # 📘 Add new documents into the Vectore Storage
+                """
+                )
+                with gr.Row():
+                    files = gr.File(label="Sube documentos", file_count="multiple", file_types=[".pdf"])
+                    add_document = gr.Button("Add it")
+                with gr.Row():
+                    new_chunks_added = gr.HTML()
+                    
+
+            # ======== Button functionalities ========
             apply_btn.click(
                 fn=pack_and_apply,
                 inputs=[state, temperature, reset_collection],
@@ -143,6 +178,12 @@ def run_gradio(Chat):
                 inputs=[state],
                 outputs=[salida]
             )
+
+            add_document.click(
+                 fn = add_new_doc,
+                 inputs=[state,files],
+                 outputs=[state, new_chunks_added, vectore_storage_size]
+             )
                 
 
     demo.launch()
