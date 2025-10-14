@@ -3,46 +3,73 @@ import os
 from .style import status_box, metric_card
 
 def run_gradio(Chat):
+    """
+    Spin up the Gradio UI and wire it to a Chat instance factory.
+    Inputs:
+        Chat (type): a callable/class that returns a Chat object when invoked.
+    Outputs:
+        None (launches Gradio)
+    """
 
-    def get_pdf_url(File):
+    def get_pdf_url(file_name:str )-> str:
+        """
+        Build a public/relative URL for a PDF stored under ./data.
+        Inputs:
+            file_name (str)
+        Outputs:
+            str: URL to the file (HF Space or local relative path).
+        """
         space_id = os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID")
         if space_id:
-             return f"https://huggingface.co/spaces/{space_id}/blob/main/data/{File}"
+             return f"https://huggingface.co/spaces/{space_id}/blob/main/data/{file_name}"
         # En local → crea URL relativa
-        return f"./data/{File}"
+        return f"./data/{file_name}"
 
-    def get_pdf_link(answer):
-
+    def get_pdf_link(answer: dict) -> str:
+        """
+        Format source document links (filename + page) from the chain response.
+        Inputs:
+            answer (dict): result from `Chat.run_llm_call`.
+        Outputs:
+            str: markdown list of sources.
+        """
         lines = []
-        for i, d in enumerate(answer['source_documents']):
-            file_name  = d.metadata.get("source")
-            file_name = file_name.replace("/", "\\").split("\\")[-1]
+        for i, d in enumerate(answer["source_documents"]):
+            # robust, cross-platform basename
+            file_name = os.path.basename(d.metadata.get("source", ""))
             page = d.metadata.get("page", "¿?")
-            url = get_pdf_url(file_name)    
+            url = get_pdf_url(file_name)
             lines.append(f"[{i}] [{file_name} — p.{page}] {url}\n")
-
-            print(f'\n Source {i},   --->   {d} \n\n')
-        sources = "\n".join(lines)
-
-        return sources
+        return "\n".join(lines)
   
 
-    def send_question(question, chat_state):
+    def send_question(question :str, chat_state):
+        """
+        Ask the LLM/RAG chain a question and return the formatted outputs.
+        Inputs:
+            question (str)
+            chat_state (Chat|None)
+        Outputs:
+            tuple: (answer_text, sources_md, chat_state, vector_card_html)
+        """
         if chat_state is None:
             chat_state = Chat()               
 
         answer = chat_state.run_llm_call(question)
         sources = get_pdf_link(answer=answer)
-
-
         count =  chat_state.retriever.vector_count()
         vector_card_html = metric_card("Vector store ", str(count), "points in collection")
         return answer['answer'], sources , chat_state , vector_card_html            
 
 
-
-
     def clear_memory(chat_state):
+        """
+        Clear the chat memory (if any) and return a status message.
+        Inputs:
+            chat_state (Chat|None)
+        Outputs:
+            str
+        """
         if chat_state is None:
             return 'There isnt memory yet'
         if (len(chat_state.memory.chat_memory.messages) == 0):
@@ -52,7 +79,15 @@ def run_gradio(Chat):
     # ----------------------- APPLY THE CONF CHANGES TO THE RETRIEVER ------------------------
 
     def pack_and_apply(chat_state, temperature, reset_collection):
-
+        """
+        Apply a subset of RetrieverConfig fields and rebuild/reuse the retriever.
+        Inputs:
+            chat_state (Chat|None)
+            temperature (float)
+            reset_collection (bool)
+        Outputs:
+            tuple: (chat_state, status_html, metric_html)
+        """
         cfg = {
             'temperature': temperature,
             'reset_collection':reset_collection
@@ -61,16 +96,12 @@ def run_gradio(Chat):
         try:
             if hasattr(chat_state, "update_retriever_settings"):
                 chat_state.update_retriever_settings(cfg)
-            
             else:
                 chat_state = Chat()
                 chat_state.update_retriever_settings(cfg)
         
         except Exception as e:
-           
              return status_box(f"Error applying settings: {e}", "error"), chat_state, ""
-        
-      
 
         count = chat_state.retriever.vector_count()
         ok_html = status_box("Changes have been applied", "success")
@@ -80,14 +111,20 @@ def run_gradio(Chat):
         # ------------------- ADD NEW DOCUMENT(CHUNKS) INTO THE VECTORE STORAGE -----------------------------
 
     def add_new_doc(chat_state, documents):
+        """
+        Load user-uploaded PDFs, split into chunks and add them to the vector store.
+        Inputs:
+            chat_state (Chat|None)
+            documents (list[Path])
+        Outputs:
+            tuple: (chat_state, status_html, metric_html)
+        """
         if chat_state is None:
             chat_state = Chat()
 
         pages = chat_state.retriever.load_documents_from_gradio(documents)
         chunks = chat_state.retriever.create_chunks_splits(pages, chunk_size=1000, chunk_overlap=200, splitter='recursive')
-        for i, d  in enumerate(chunks):
-            print(f'\n -------------------------------- CHUNKS AÑADIDOS   {d.page_content}............................................\n\n')
-        #
+        
         added =chat_state.retriever.add_chunks_into_vectorestorage(chunks)
         ok_html = status_box(added, "success")
         
@@ -133,7 +170,7 @@ def run_gradio(Chat):
             with gr.TabItem("Retriever"):
                 gr.Markdown(
                 """
-                # 📘 Retriever paramethers configuration
+                # ⚙️ Retriever parameters
                 """
                 )
 
@@ -150,7 +187,7 @@ def run_gradio(Chat):
             with gr.TabItem("Add new documents"):
                 gr.Markdown(
                 """
-                # 📘 Add new documents into the Vectore Storage
+                # ➕ Add new documents to the vector store
                 """
                 )
                 with gr.Row():

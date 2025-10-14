@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from typing import List, Tuple
 from .conf import RetrieverConfig
 import uuid
 
@@ -25,63 +25,76 @@ from langchain.schema import Document as LCDocument
 
 
 class Retriever():
+    """
+    Handles: loading PDFs, chunking, building the Qdrant vector store and exposing
+    a LangChain retriever.
+    """
     def __init__(self, cfg: RetrieverConfig):
-        # 1) Retriever configuration
+        """
+        Build the retriever from disk PDFs (if any).
+        Inputs:
+            cfg (RetrieverConfig): configuration for paths, embeddings and vector store.
+        Outputs: None
+        """
+        # Retriever configuration
         self.cfg = cfg              
-        # 2) Load documents from the 'data' directory
+        # Load documents from the 'data' directory
         self.all_document_pages = self.load_documents_from_directory(self.cfg.data_path)
-        # 3) Create chunks from the loaded documents
+        # Create chunks from the loaded documents
         self.chunks = self.create_chunks_splits(self.all_document_pages, chunk_size=1000, chunk_overlap=200, splitter='recursive')
-        # 4) Build the Qdrant retriever
+        # Build the Qdrant retriever
         self.client, self.retriever = self.build_retriever(chunks=self.chunks, collection_name=self.cfg.collection_name, path=self.cfg.index_path)
                     
-    def close(self):
-            '''Close the client sesion'''
-            self.client.close() # Finally, close the client connection -->>> Good practice , avoiding resource leaks and warning messages.
+    def close(self) -> None:
+            """Close the client session to avoid resource leaks and warnings."""
+            self.client.close()
 
-
-    def load_documents_from_directory(self, directory_path): # Ruta absoluta a /data junto a este archivo 
-
-        '''
-        Load all PDF documents from a specified directory.
-        Args:
-            directory_path (str): Path to the directory containing PDF documents.
+    def load_documents_from_directory(self, directory_path): 
+        """
+        Load all PDF documents from a given directory (recursive).
+        Inputs:
+            directory_path (Path|str): folder containing PDFs.
         Outputs:
-            list: List of loaded PDF documents.
-        '''
-
-        all_document_pages = []
+            list[Document]: all pages loaded as LangChain Documents.
+        """
         loader = DirectoryLoader(
-                str(directory_path),  # Convertir a cadena
-                glob="**/*.pdf",          # todos los PDFs (subcarpetas incluidas)
+                str(directory_path), 
+                glob="**/*.pdf",          
                 loader_cls=PyPDFLoader
             )
-        all_document_pages = loader.load()
-        return all_document_pages
+        return loader.load()
     
     def load_documents_from_gradio(self, documents):
+        """
+        Load PDFs uploaded via Gradio file input.
+        Inputs:
+            documents (list[str|Path]): paths provided by Gradio.
+        Outputs:
+            list[Document]: all pages loaded.
+        """
         docs = []
         for i in documents:
             loader = PyPDFLoader(i)
             pages = loader.load()
-            docs.extend(pages
-                        )
+            docs.extend(pages)
         return docs
 
-    def create_chunks_splits(self, documents, chunk_size=1000, chunk_overlap=200, splitter = 'recursive'):  # By default, use recursive splitter
-
-        '''
-        Split documents into smaller chunks for better processing.
-
-        Args:
-            documents (list): List of documents to be split.
-            chunk_size (int): Size of each chunk.
-            chunk_overlap (int): Overlap between chunks.
-            splitter (str): Type of text splitter to use ('recursive', 'character', 'markdown', 'token').
+    def create_chunks_splits(
+        self, 
+        documents, 
+        chunk_size=1000, 
+        chunk_overlap=200, 
+        splitter = 'recursive'): 
+        """
+        Split documents into smaller chunks for retrieval.
+        Inputs:
+            documents (list[Document])
+            chunk_size (int)
+            chunk_overlap (int)
+            splitter (str): 'recursive' | 'character' | 'markdown' | 'token'
         Outputs:
-            list: List of document chunks.
-        '''
-
+            list[Document]: chunked documents with metadata preserved.
+        """
         if splitter == 'recursive':
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
@@ -96,29 +109,26 @@ class Retriever():
         else:
             raise ValueError("Invalid splitter type. Choose from 'recursive', 'character', 'markdown', or 'token'.")
         
-        chunks = text_splitter.split_documents(documents)
-        return chunks
+        return text_splitter.split_documents(documents)
+        
         
     def build_retriever(self, chunks, collection_name, path):
-
-        '''
-        Build a Qdrant retriever from document chunks, using Google Generative AI embeddings and local Qdrant vector Database.
-
-        Args:
-            chunks (list): List of document chunks.
-            collection_name (str): Name of the Qdrant collection.
-            path (str): Path to store the Qdrant local database.
+        """
+        Build a Qdrant retriever using Google embeddings and a local Qdrant instance.
+        Inputs:
+            chunks (list[Document])
+            collection_name (str)
+            path (Path|str): local DB path for Qdrant
         Outputs:
-                Qdrant retriever object.
-        '''
-
+            (QdrantClient, BaseRetriever)
+        """
         # 1) Initialize Google Generative AI Embeddings
         embeddings = GoogleGenerativeAIEmbeddings(model=self.cfg.embed_model)
 
-        # 2) Initialize Qdrant client (local instance) -->>> Good practice
+        # 2) Initialize Qdrant client (local instance)
         client = QdrantClient(
-            path=str(path),                          # Convertir a cadena
-            prefer_grpc=self.cfg.prefer_grpc,        # Cambiar a False si hay problemas con gRPC
+            path=str(path),                          
+            prefer_grpc=self.cfg.prefer_grpc,       
         )
 
         # 3) Create the collection (Only if it doesnt exits)
@@ -133,9 +143,7 @@ class Retriever():
         if self.cfg.reset_collection:
             client.delete(
                 collection_name=collection_name,
-                points_selector=FilterSelector(
-                    filter=Filter(must=[])
-                ),
+                points_selector=FilterSelector(filter=Filter(must=[])),
                 wait=True,  
             )
 
@@ -146,12 +154,7 @@ class Retriever():
             collection_name=collection_name
         )
 
-        # 5) Add chunks and metadatas to vectorestore (It only indexes if the collection is empty)
-        if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
-             ids = self._make_ids(chunks)
-             vectorestore.add_documents(chunks, ids=ids)
-
-        # 6) kwargs seguros según search_type
+        # 5) Safe kwargs for retriever
         kwargs = {"k": self.cfg.vectore_store_k}
         if self.cfg.vectore_store_search_type == "mmr":
             kwargs.update({
@@ -159,35 +162,40 @@ class Retriever():
                 "lambda_mult": float(self.cfg.vectore_store_lambda_mult),
             })
 
-        # 7) Create retriever from vectorestore
-        retriever = vectorestore.as_retriever(search_type= self.cfg.vectore_store_search_type,
-                                                search_kwargs=kwargs,
-                                             )
+        # 6) Create retriever from vectorestore
+        retriever = vectorestore.as_retriever(
+            search_type= self.cfg.vectore_store_search_type,
+            search_kwargs=kwargs,
+        )
         
+        # 7) Index initial chunks only if empty
         if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
              ids = self._make_ids(chunks)
              retriever.add_documents(chunks, ids=ids)
 
         return client,retriever
     
-    def add_chunks_into_vectorestorage(self,chunks):
+    def add_chunks_into_vectorestorage(self,chunks) -> str:
+        """
+        Add new chunks to the existing vector store.
+        Inputs:
+            chunks (list[Document])
+        Outputs:
+            str: status message.
+        """
         ids = self._make_ids(chunks)
         self.retriever.add_documents(chunks, ids=ids)
         return 'New chunks have been uploaded into the Retriever'
 
     
     def _make_ids(self, chunks):
-        '''Generate **deterministic, human-traceable IDs** for document chunks.
-            Args:
-                chunks (list[langchain.schema.Document]): Chunked documents containing metadata
-                    such as:
-                    - "source": logical path or filename (prefer a content hash for robustness)
-                    - "page": page number in the source PDF
-                    - "start_index": character offset used by the splitter
-
-            Returns:
-                list[str]: A list of UUIDv5 strings aligned positionally with `chunks`. These IDs
-                are intended to be passed to the vector store's add/upsert operation.'''
+        """
+        Generate deterministic, human-traceable IDs for document chunks.
+        Inputs:
+            chunks (list[Document]): must contain metadata keys 'source', 'page', 'start_index'.
+        Outputs:
+            list[str]: stable UUIDv5 identifiers aligned with the input order.
+        """
         ids = []
         for i, d in enumerate(chunks):
             src   = d.metadata.get("source", "doc")
@@ -195,25 +203,26 @@ class Retriever():
             start = d.metadata.get("start_index", i)
             key = f"{src}|p{page}|s{start}"
             ids.append(str(uuid.uuid5(uuid.NAMESPACE_URL, key)))
-
         return ids
 
-    def get_relevant_documents(self, query):
-
-        '''
-        Retrieve relevant documents based on a query using the provided retriever.
-
-        Args:
-            query (str): The query string to search for relevant documents.
+    def get_relevant_documents(self, query:str):
+        """
+        Retrieve relevant documents for a query using the underlying retriever.
+        Inputs:
+            query (str)
         Outputs:
-            list: List of relevant documents.
-        '''
+            list[Document]
+        """
         return self.retriever.invoke(query)
     
 
     def vector_count(self) -> int:
-        """Número de vectores (points) en la colección actual."""
+        """
+        Number of vectors (points) currently stored in the collection.
+        Inputs:  None
+        Outputs: int
+        """
         return self.client.count(
             collection_name=self.cfg.collection_name,
-            exact=True,   # True = conteo exacto
+            exact=True,  
         ).count

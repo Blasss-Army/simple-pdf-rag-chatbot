@@ -1,10 +1,15 @@
 # ui/helpers.py
-# Funciones de ayuda para renderizar contenido bonito en Gradio (HTML embebido)
+# Helper functions to render nice HTML snippets inside Gradio (embedded HTML)
 
 def status_box(text: str, kind: str = "success") -> str:
     """
-    Caja de estado: success | error | info
-    Devuelve un string HTML listo para pasarlo a gr.HTML()/gr.Markdown().
+    Render a status box: 'success' | 'error' | 'info'.
+    Returns an HTML string suitable for gr.HTML()/gr.Markdown().
+    Inputs:
+        text (str)
+        kind (str)
+    Outputs:
+        str (HTML)
     """
     styles = {
         "success": ("#ecfdf5", "#10b981", "#065f46", "✅"),
@@ -21,9 +26,14 @@ def status_box(text: str, kind: str = "success") -> str:
 
 def metric_card(label: str, value: int | float | str, sub: str = "points in collection") -> str:
     """
-    Tarjeta de métrica con número grande. Para contadores como num. de vectores.
+    Mini metric card (large number), useful for counters like number of vectors.
+    Inputs:
+        label (str)
+        value (int|float|str)
+        sub (str)
+    Outputs:
+        str (HTML)
     """
-    # si es numérico, darle formato con separador de miles
     try:
         value_fmt = f"{int(value):,}"
     except Exception:
