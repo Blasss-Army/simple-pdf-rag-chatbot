@@ -22,6 +22,9 @@ from langchain_qdrant import QdrantVectorStore as Qdrant
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, Filter, FilterSelector
 from langchain.schema import Document as LCDocument
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain.retrievers.document_compressors import CrossEncoderReranker
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 
 
 class Retriever():
@@ -43,7 +46,7 @@ class Retriever():
         # Create chunks from the loaded documents
         self.chunks = self.create_chunks_splits(self.all_document_pages, chunk_size=1000, chunk_overlap=200, splitter='recursive')
         # Build the Qdrant retriever
-        self.client, self.retriever = self.build_retriever(chunks=self.chunks, collection_name=self.cfg.collection_name, path=self.cfg.index_path)
+        self.client, self.retriever, self.vectorestore = self.build_retriever(chunks=self.chunks, collection_name=self.cfg.collection_name, path=self.cfg.index_path)
                     
     def close(self) -> None:
             """Close the client session to avoid resource leaks and warnings."""
@@ -154,26 +157,54 @@ class Retriever():
             collection_name=collection_name
         )
 
+        # 7) Index initial chunks only if empty
+        if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
+             ids = self._make_ids(chunks)
+             vectorestore.add_documents(chunks, ids=ids)
+
         # 5) Safe kwargs for retriever
-        kwargs = {"k": self.cfg.vectore_store_k}
-        if self.cfg.vectore_store_search_type == "mmr":
-            kwargs.update({
-                "fetch_k": self.cfg.vectore_store_fetch_k,
-                "lambda_mult": float(self.cfg.vectore_store_lambda_mult),
-            })
+
+        # Using rerank
+        if self.cfg.use_reranker:
+            kwargs = {"k": self.cfg.vectore_store_k * 4}
+
+        # Using mmr or similarity
+        else :
+            # Just similarity
+            kwargs = {"k": self.cfg.vectore_store_k }
+
+            # Using mmr
+            if self.cfg.vectore_store_search_type == "mmr":
+                kwargs.update({
+                    "k": self.cfg.vectore_store_k,
+                    "fetch_k": self.cfg.vectore_store_fetch_k,
+                    "lambda_mult": float(self.cfg.vectore_store_lambda_mult),
+                })
 
         # 6) Create retriever from vectorestore
-        retriever = vectorestore.as_retriever(
+        base_retriever = vectorestore.as_retriever(
             search_type= self.cfg.vectore_store_search_type,
             search_kwargs=kwargs,
         )
         
-        # 7) Index initial chunks only if empty
-        if (client.count(collection_name=self.cfg.collection_name,exact=True,).count == 0):
-             ids = self._make_ids(chunks)
-             retriever.add_documents(chunks, ids=ids)
+        # 7) Optional: cross-encoder reranking
+        if self.cfg.use_reranker:
+            cross_encoder = HuggingFaceCrossEncoder(
+                model_name=self.cfg.reranker_model
+            )
+            compressor = CrossEncoderReranker(
+                model=cross_encoder,
+                top_n= self.cfg.reranker_top_k,
+            )
 
-        return client,retriever
+            retriever = ContextualCompressionRetriever(
+                base_retriever=base_retriever,
+                base_compressor=compressor,
+            )
+        else:
+            retriever = base_retriever
+       
+        return client, retriever, vectorestore
     
     def add_chunks_into_vectorestorage(self,chunks) -> str:
         """
@@ -184,7 +215,7 @@ class Retriever():
             str: status message.
         """
         ids = self._make_ids(chunks)
-        self.retriever.add_documents(chunks, ids=ids)
+        self.vectorestore.add_documents(chunks, ids=ids)
         return 'New chunks have been uploaded into the Retriever'
 
     

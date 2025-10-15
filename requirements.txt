@@ -7,6 +7,7 @@ langchain-qdrant
 qdrant-client
 pypdf
 python-dotenv
+sentence-transformers
 
 # SDKs de Google (usa uno u otro según tu código)
 google-generativeai     # para langchain_google_genai (más común)

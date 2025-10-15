@@ -78,19 +78,33 @@ def run_gradio(Chat):
     
     # ----------------------- APPLY THE CONF CHANGES TO THE RETRIEVER ------------------------
 
-    def pack_and_apply(chat_state, temperature, reset_collection):
+    def pack_and_apply(chat_state, temperature, reset_collection, use_reranker, vectore_store_search_type):
         """
         Apply a subset of RetrieverConfig fields and rebuild/reuse the retriever.
         Inputs:
             chat_state (Chat|None)
             temperature (float)
             reset_collection (bool)
+            use_reranker (bool)
+            vectore_store_search_type (bool)
         Outputs:
             tuple: (chat_state, status_html, metric_html)
         """
+
+        if use_reranker:
+            use_mmr =  'similarity'
+
+        else:
+            if vectore_store_search_type:
+                use_mmr = 'mmr'
+            else:
+                use_mmr = 'similarity'
+
         cfg = {
             'temperature': temperature,
-            'reset_collection':reset_collection
+            'reset_collection': reset_collection,
+            'use_reranker': use_reranker,
+            'vectore_store_search_type' : use_mmr
         }
 
         try:
@@ -175,8 +189,10 @@ def run_gradio(Chat):
                 )
 
                 with gr.Row():
-                    temperature = gr.Slider(0.0, 1.0, value=0.2, step=0.05, label="temperature")
-                    reset_collection = gr.Checkbox(value=False, label="reset collection")
+                    temperature = gr.Slider(0.0, 1.0, value=0.2, step=0.05, label="temperature", scale= 2)
+                    reset_collection = gr.Checkbox(value = False, label="reset collection", scale= 0)
+                    use_reranker = gr.Checkbox(value = False, label="use reranker", scale= 0)
+                    vectore_store_search_type = gr.Checkbox(value = False, label="use mmr", scale= 0)
 
                 apply_btn = gr.Button("Apply settings")
                 with gr.Row():
@@ -200,7 +216,7 @@ def run_gradio(Chat):
             # ======== Button functionalities ========
             apply_btn.click(
                 fn=pack_and_apply,
-                inputs=[state, temperature, reset_collection],
+                inputs=[state, temperature, reset_collection, use_reranker, vectore_store_search_type],
                 outputs=[state, apply_msg , vectore_storage_size],
             )
 

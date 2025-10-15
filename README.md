@@ -27,7 +27,8 @@ It uses **Google Gemini** for language generation, **text-embedding-004** for se
 - 🧬 **Deterministic chunk IDs** ensure reproducible citations and safe re-indexing.  
 - 💬 **Conversational memory** remembers previous context across turns.  
 - 🌐 **Cross-platform compatible** and ready for deployment or containerization.
-- 📄**Drop PDFs in a folder** → ask questions and get **cited answers** with page numbers.
+- 📄 **Drop PDFs in a folder** → ask questions and get **cited answers** with page numbers.
+- 🔀 **Optional reranking stage** that rescrores and reorders retrieved chunks to improve answer quality (keeps the most relevant `k` from a larger candidate pool).
 
 ---
 
@@ -39,6 +40,7 @@ It uses **Google Gemini** for language generation, **text-embedding-004** for se
 - **Frameworks:** [LangChain](https://www.langchain.com/) + [Gradio](https://www.gradio.app/)
 - **Language:** Python 3.10+
 - **Environment:** `.env` for API keys (`GOOGLE_API_KEY`)
+- **(New) Reranker:** Optional reranking layer that operates on top of the vector search results (model/strategy is configurable in code).
 
 ---
 
@@ -53,6 +55,9 @@ User (Gradio UI)
          │      ├─ Embed with Google text-embedding-004
          │      └─ Store vectors in local Qdrant (path = ./index)
          │
+         ├─► (Optional) Reranker
+         │      └─ Rescore top-N candidates from vector search; keep top-k
+         │
          └─► Memory (ConversationBufferMemory)
 ```
 
@@ -65,11 +70,11 @@ P1-Simple PDF RAG Chatbot/
 ├─ app_core/
 │  ├─ __init__.py
 │  ├─ prompt.py           # Prompt templates for the LLM
-│  └─ llm_call.py         # Main Chat class (chain, memory, retriever orchestration)
+│  └─ llm_call.py         # Main Chat class (chain, memory, retriever + (optional) reranking)
 ├─ create_retriever/
 │  ├─ __init__.py
 │  ├─ conf.py             # RetrieverConfig dataclass
-│  └─ retriever.py        # PDF loading, chunking, embedding, Qdrant setup
+│  └─ retriever.py        # PDF loading, chunking, embedding, Qdrant setup (+ rerank orchestration)
 ├─ ui/
 │  ├─ __init__.py
 │  ├─ gradio_app.py       # Gradio UI logic
@@ -102,9 +107,18 @@ class RetrieverConfig:
     vectore_store_k: int = 5
     vectore_store_fetch_k: int = 30
     vectore_store_lambda_mult: float = 0.5
+    # Rerank is optional and configured in code/UI. See notes below.
 ```
 
-💡 **Tip:** Set `reset_collection=True` the first time or whenever you want to rebuild the index from scratch.
+### 🔀 Reranking (optional)
+
+- **What it does:** After the initial vector search returns a candidate pool of size **`vectore_store_fetch_k`**, the reranker **rescoring** step reorders candidates by query–passage relevance and keeps the most relevant **`vectore_store_k`** chunks that are passed to the LLM.
+- **Why it helps:** Improves factual grounding and reduces noisy contexts, especially when using larger `fetch_k`.
+- **How to enable:** Toggle it in your code or UI (depending on your implementation). The reranker runs **on top of** your current `vectore_store_search_type` (e.g., `"mmr"` or `"similarity"`), so you can keep MMR for diversity and still benefit from relevance reranking.
+- **Recommended values:** Start with `vectore_store_k = 5` and `vectore_store_fetch_k = 30`. If you need more precision, increase `fetch_k` (e.g., 50–100) and keep `k` modest (5–8).
+- **Performance tip:** If you combine MMR + Rerank, a common heuristic is to MMR-select a pool and then rerank that pool. You can also use a split like `ceil(k/2)` from MMR + `ceil(k/2)` from pure similarity before the final rerank to balance diversity and precision.
+
+> Implementation details (model, thresholds, toggles) are intentionally left in code so you can swap different rerankers (e.g., cross-encoders, LLM scoring).
 
 ---
 
@@ -116,10 +130,11 @@ class RetrieverConfig:
 git clone <your-repo-url>
 cd P1-Simple-PDF-RAG-Chatbot
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scriptsctivate
 
 pip install -U pip
 pip install langchain langchain-community langchain-google-genai qdrant-client gradio python-dotenv
+# If your reranker needs extras (e.g., sentence-transformers), install them here.
 ```
 
 ---
@@ -131,6 +146,8 @@ Create a `.env` file in the project root:
 ```bash
 GOOGLE_API_KEY=your_api_key_here
 ```
+
+Add any reranker-specific environment variables here if your implementation uses them.
 
 ---
 
@@ -162,14 +179,16 @@ Once started, open your browser at:
 
 1. PDFs are loaded and split into overlapping text chunks (`RecursiveCharacterTextSplitter`).
 2. Each chunk is embedded using `text-embedding-004`.
-3. Vectors are stored in Qdrant and retrieved with **MMR search**.
-4. Retrieved context + user query are passed to **Gemini**, which generates a grounded, cited answer.
-5. Responses include references (file + page) and use conversational memory for context-aware conversations.
+3. **Vector search** in Qdrant retrieves a **candidate pool** of size `vectore_store_fetch_k` using your chosen search strategy (e.g., MMR or similarity).
+4. **(Optional) Reranking** **rescoring** step orders those candidates by fine-grained relevance and keeps the top `vectore_store_k` for the LLM.
+5. Retrieved context + user query are passed to **Gemini**, which generates a grounded, cited answer.
+6. Responses include references (file + page) and use conversational memory for context-aware conversations.
 
 ---
 
 ## 🛠️ Key Improvements in This Version
 
+- ✅ **Reranking stage added:** improves precision by rescoring retrieved chunks before passing them to the LLM.  
 - ✅ **Chain bug fix:** `_make_chain()` now returns a valid `ConversationalRetrievalChain`.  
 - ✅ **Retriever refactor:** duplicate insertions removed and retrieval logic improved.  
 - ✅ **Dynamic updates:** retriever settings can be modified from the UI without restarting the app.  
@@ -182,7 +201,8 @@ Once started, open your browser at:
 ## 🧪 Recommended Tests
 
 - Upload multiple PDFs and query across them.  
-- Adjust retrieval settings (e.g., `k`, `lambda_mult`) to see real-time impact.  
+- Adjust retrieval settings (e.g., `k`, `fetch_k`, `lambda_mult`) to see real-time impact.  
+- Toggle reranking ON/OFF and measure answer quality and latency.  
 - Clear memory and test context retention across turns.  
 - Verify citation stability across repeated runs (deterministic IDs).  
 
@@ -190,8 +210,8 @@ Once started, open your browser at:
 
 ## 📈 Future Enhancements
 
-- 🔍 Hybrid lexical-vector retrieval  
-- 📊 Cross-encoder reranking  
+- 🔍 Hybrid lexical–vector retrieval  
+- 📊 Learned/LLM-assisted reranking strategies with calibration
 - 🌐 Multilingual question answering  
 - 📑 Clickable citations with direct PDF previews  
 - ⚡ FastAPI backend and REST API endpoints  
